@@ -1,0 +1,4 @@
+# Test-only dependencies - not needed to run the app itself, just its
+# test suite (see tests/). Kept separate from requirements.txt so a normal
+# install/deploy never pulls in tooling nobody but a developer needs.
+pytest>=8,<9

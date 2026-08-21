@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "MimeTypes": [
+            "inode/directory",
+            "application/octet-stream"
+        ],
+        "Name": "OneDrive",
+        "ServiceTypes": [
+            "KFileItemAction/Plugin"
+        ]
+    }
+}

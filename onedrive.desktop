@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=OneDrive for Linux Client
+GenericName=OneDrive Sync
+Comment=On-demand OneDrive mount and two-way folder sync
+Exec=/path/to/onedrive-linux-client/.venv/bin/python3 -m onedrive
+Path=/path/to/onedrive-linux-client
+Terminal=false
+Icon=folder-onedrive
+Categories=Network
+Type=Application
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=10
