@@ -1,0 +1,13 @@
+msal>=1.28,<2
+requests>=2.31,<3
+refuse>=0.0.4,<1
+pyfuse3>=3.2,<4
+keyring>=25.0,<26
+watchdog>=4,<5
+# Direct EWMH _NET_WM_STATE_SKIP_TASKBAR control (onedrive/gui/x11_hints.py) -
+# Qt's own window-type-hint flags weren't enough to keep the main window off
+# the taskbar on their own; this is standard freedesktop.org EWMH, not a
+# KDE-specific dependency, so it doesn't affect running on other desktops -
+# it just quietly does nothing there (only relevant under X11/XWayland,
+# which this app already requires for window positioning in general).
+python-xlib>=0.33,<1
