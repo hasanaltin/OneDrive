@@ -75,11 +75,25 @@ def apply_update() -> None:
     """Pulls the update already confirmed available by check_for_update(),
     then reinstalls dependencies (a new version may have added one) -
     mirrors install.sh's own dependency step, safe to re-run (pip no-ops
-    on anything already satisfied). --ff-only rather than a plain pull:
-    this checkout is never meant to carry local commits, so anything that
-    can't fast-forward is a real problem the user needs to look at
-    directly, not something to silently merge or rebase around."""
-    _run_git("pull", "--ff-only", "origin", "main", timeout=60.0)
+    on anything already satisfied). Tries --ff-only first - this checkout
+    is never meant to carry local commits, so a normal update should always
+    be a fast-forward. If the remote history was ever rewritten upstream
+    (e.g. a maintainer force-push), --ff-only can't reconcile that and every
+    user's checkout would otherwise be stuck needing a git expert to
+    unbreak it manually - so as a fallback, and only after re-confirming
+    there are truly no local changes to lose, this force-syncs to whatever
+    origin/main now is instead of leaving the update button broken."""
+    try:
+        _run_git("pull", "--ff-only", "origin", "main", timeout=60.0)
+    except UpdateCheckError:
+        if _run_git("status", "--porcelain"):
+            raise UpdateCheckError(
+                "Update can't fast-forward and this checkout has local changes - "
+                "resolve or discard them before updating."
+            )
+        logger.warning("fast-forward update failed; force-syncing to origin/main instead")
+        _run_git("fetch", "origin", "main", timeout=30.0)
+        _run_git("reset", "--hard", "origin/main", timeout=15.0)
 
     venv_pip = REPO_DIR / ".venv" / "bin" / "pip"
     if not venv_pip.exists():
