@@ -71,6 +71,7 @@ class ConflictsDialog(QDialog):
     stays agnostic to which kind of conflict it's showing."""
 
     _resolved = pyqtSignal(int, str)  # row_id, error message ("" on success)
+    _bulk_resolved = pyqtSignal(str)  # newline-joined per-file errors, "" if all succeeded
 
     def __init__(self, db: Database, source: str, title: str, resolve_fn, conflict_count: int = 0,
                  on_changed=None, parent=None):
@@ -85,6 +86,7 @@ class ConflictsDialog(QDialog):
 
         self._layout = QVBoxLayout(self)
         self._resolved.connect(self._on_resolved)
+        self._bulk_resolved.connect(self._on_bulk_resolved)
 
         self._info = QLabel(
             "Each of these files was edited on both sides before either edit had been synced, "
@@ -104,6 +106,14 @@ class ConflictsDialog(QDialog):
         self._layout.addWidget(self._empty_label)
 
         button_row = QHBoxLayout()
+        self._bulk_local_btn = QPushButton("Keep Local (All)")
+        self._bulk_server_btn = QPushButton("Keep Server (All)")
+        self._bulk_local_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bulk_server_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bulk_local_btn.clicked.connect(lambda: self._bulk_resolve("keep_local"))
+        self._bulk_server_btn.clicked.connect(lambda: self._bulk_resolve("keep_server"))
+        button_row.addWidget(self._bulk_local_btn)
+        button_row.addWidget(self._bulk_server_btn)
         button_row.addStretch(1)
         self._close_btn = QPushButton("Close")
         self._close_btn.clicked.connect(self.accept)
@@ -116,6 +126,9 @@ class ConflictsDialog(QDialog):
     def _reload(self) -> None:
         conflicts = self.db.list_conflicts(self.source)
         self._list.clear()
+
+        self._bulk_local_btn.setVisible(bool(conflicts))
+        self._bulk_server_btn.setVisible(bool(conflicts))
 
         if not conflicts:
             self._list.hide()
@@ -135,12 +148,65 @@ class ConflictsDialog(QDialog):
         self._empty_label.hide()
         self._info.show()
         self._list.show()
+        self._bulk_local_btn.setText(f"Keep Local (All {len(conflicts)})")
+        self._bulk_server_btn.setText(f"Keep Server (All {len(conflicts)})")
         for c in conflicts:
             row = _ConflictRow(c, self._on_decision)
             item = QListWidgetItem()
             item.setSizeHint(row.sizeHint())
             self._list.addItem(item)
             self._list.setItemWidget(item, row)
+
+    def _set_all_busy(self, busy: bool) -> None:
+        for i in range(self._list.count()):
+            widget = self._list.itemWidget(self._list.item(i))
+            if widget is not None:
+                widget.set_busy(busy)
+        self._bulk_local_btn.setEnabled(not busy)
+        self._bulk_server_btn.setEnabled(not busy)
+        self._close_btn.setEnabled(not busy)
+
+    def _bulk_resolve(self, decision: str) -> None:
+        conflicts = self.db.list_conflicts(self.source)
+        if not conflicts:
+            return
+
+        verb = "Keep the local edit" if decision == "keep_local" else "Keep the server version"
+        other = "the current server version" if decision == "keep_local" else "the local edit"
+        confirm = QMessageBox.question(
+            self, "Resolve All Conflicts",
+            f"{verb} for all {len(conflicts)} conflicts listed here?\n\n"
+            f"For each one, the conflicted copy holding {other} will be permanently deleted "
+            "(OneDrive moves the remote copy to its recycle bin; the local copy is removed "
+            "directly and is not recoverable through this app). This cannot be undone through "
+            "this app.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        self._set_all_busy(True)
+
+        def run():
+            errors = []
+            for c in conflicts:
+                try:
+                    self.resolve_fn(c, decision)
+                except Exception as exc:
+                    errors.append(f"{c['name']}: {exc or exc.__class__.__name__}")
+            self._bulk_resolved.emit("\n".join(errors))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_bulk_resolved(self, error_summary: str) -> None:
+        self._set_all_busy(False)
+        if error_summary:
+            QMessageBox.warning(
+                self, "Resolve All Conflicts",
+                f"Some conflicts couldn't be resolved:\n\n{error_summary}",
+            )
+        self._reload()
+        if self._on_changed is not None:
+            self._on_changed()
 
     def _on_decision(self, row: "_ConflictRow", decision: str) -> None:
         if decision in ("keep_local", "keep_server"):
