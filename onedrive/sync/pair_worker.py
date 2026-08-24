@@ -179,6 +179,7 @@ class PairSyncWorker(threading.Thread):
         created_remote_ids: dict[str, str] = {}
         conflicts = 0
         stopped_early = False
+        unresolved_new_item = False
         for idx, action in enumerate(actions, start=1):
             # Without this, pausing (manually, or via the metered/battery
             # auto-pause) didn't actually stop an in-progress pair sync at
@@ -225,6 +226,22 @@ class PairSyncWorker(threading.Thread):
                             "pair %s: couldn't refresh %s after conflict (may have been deleted)",
                             pair.id, action.rel_path, exc_info=True,
                         )
+                else:
+                    # No remote_item_id means this was a fresh create this
+                    # pass's remote_map (built from our own delta-sync cache,
+                    # not a live call) didn't know about yet - graph_client's
+                    # own retry-as-replace already tried and failed to find
+                    # it via a live lookup too. If this is still the
+                    # bootstrap pass, don't let it stamp last_sync_at below:
+                    # doing so would permanently flip is_bootstrap False for
+                    # this pair, and once delta sync does catch up, this
+                    # exact same file - even if byte-identical on both sides
+                    # - would hit reconcile_pair() as a same-size match with
+                    # no is_bootstrap left to trust it, so it'd be flagged a
+                    # real CONFLICT instead of silently recognized as already
+                    # synced. Deferring instead lets the next pass retry
+                    # bootstrap-eligible, once the cache has caught up.
+                    unresolved_new_item = True
             except OSError:
                 logger.exception("pair %s: local filesystem op failed for %s", pair.id, action.rel_path)
 
@@ -232,7 +249,7 @@ class PairSyncWorker(threading.Thread):
             for _ in range(conflicts):
                 self.db.increment_conflict_count(pair.id)
 
-        if stopped_early:
+        if stopped_early or unresolved_new_item:
             # Don't mark this pass "idle" or stamp last_sync_at - it's
             # genuinely incomplete, and last_sync_at also drives the next
             # pass's is_bootstrap check, which assumes a truthful "did a
@@ -247,8 +264,15 @@ class PairSyncWorker(threading.Thread):
         if is_bootstrap:
             # write synced baselines for the "trusted as already-synced" pairs
             # the bootstrap heuristic silently skipped (no action was emitted
-            # for them, so nothing above would have recorded a baseline)
-            self._write_bootstrap_baselines(pair, local_map, remote_map, synced_map)
+            # for them, so nothing above would have recorded a baseline).
+            # acted_paths excludes anything that DID get an action this pass
+            # (including CONFLICT) - those already have a correct, fresh
+            # baseline written by their own handler above (_resolve_conflict/
+            # _execute_action); re-deriving from the pre-loop local_map/
+            # remote_map snapshot here would clobber it with stale
+            # pre-resolution data instead.
+            acted_paths = {action.rel_path for action in actions}
+            self._write_bootstrap_baselines(pair, local_map, remote_map, synced_map, acted_paths)
 
         self.db.update_pair_status(pair.id, "idle", last_sync_at=now_iso())
         self.on_status(pair.id, "Idle")
@@ -347,9 +371,9 @@ class PairSyncWorker(threading.Thread):
             )
         return result
 
-    def _write_bootstrap_baselines(self, pair, local_map, remote_map, synced_map) -> None:
+    def _write_bootstrap_baselines(self, pair, local_map, remote_map, synced_map, acted_paths) -> None:
         for rel_path, L in local_map.items():
-            if rel_path in synced_map or L.is_folder:
+            if rel_path in synced_map or rel_path in acted_paths or L.is_folder:
                 continue
             R = remote_map.get(rel_path)
             if R is None or R.size != L.size:

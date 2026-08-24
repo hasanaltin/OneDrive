@@ -437,7 +437,18 @@ class GraphClient:
                 "app's own cache didn't know about - looking it up and retrying as a replace",
                 name,
             )
-            discovered = self.get_item_by_path(drive_id, parent_id, name)
+            # The 409 itself confirms the item exists server-side, but this
+            # lookup can still race a moment behind Graph's own read-after-
+            # write consistency and come back empty - retried a couple of
+            # times with backoff before giving up, rather than surfacing a
+            # conflict for something we were just told is really there.
+            discovered = None
+            for delay in (0.0, 0.5, 1.5):
+                if delay:
+                    time.sleep(delay)
+                discovered = self.get_item_by_path(drive_id, parent_id, name)
+                if discovered is not None:
+                    break
             if discovered is None:
                 raise
             return self._upload_file_once(
