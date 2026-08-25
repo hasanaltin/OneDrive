@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 
 from onedrive import constants
 from onedrive.content_cache import ContentCache
@@ -25,6 +26,7 @@ class PinWorker(threading.Thread):
         self.interval = interval
         self._stop = threading.Event()
         self._wake = threading.Event()
+        self._items_seen = 0
 
     def run(self) -> None:
         while not self._stop.is_set():
@@ -50,6 +52,14 @@ class PinWorker(threading.Thread):
         for child in self.db.list_children(folder.drive_id, folder.id):
             if self._stop.is_set():
                 return
+            self._items_seen += 1
+            if self._items_seen % 20 == 0:
+                # Explicit scheduling point - a pinned folder with thousands
+                # of small files (confirmed live: a git repo's .git/objects)
+                # reproducibly left the GUI feeling unresponsive during the
+                # eager download pass, same root cause and same fix as
+                # pair_worker's per-action loop.
+                time.sleep(0)
             # Re-checks the ROOT folder's live pin state before every file,
             # not just the worker's own shutdown flag - without this, a
             # folder unpinned seconds (or even mid-way) into its own

@@ -112,6 +112,12 @@ MOUNT_SYNC_INTERVAL_SECONDS = 60
 # --- Folder Pairs (two-way sync) tuning -------------------------------------
 PAIR_SYNC_INTERVAL_SECONDS = 60
 LOCAL_WATCH_DEBOUNCE_SECONDS = 2.0
+# Caps how often the per-file "Uploading/Downloading X" progress message
+# (DB write + GUI signal) is sent during a single pass - a batch in the
+# thousands doing this for every file was a real, reproducible source of GUI
+# unresponsiveness (DB lock contention plus a flood of Qt signals), not just
+# a cosmetic status string nobody could read that fast anyway.
+PAIR_PROGRESS_UPDATE_INTERVAL_SECONDS = 0.2
 # reconcile.py's bootstrap heuristic (a pair's very first sync pass) used to
 # trust same-size existing-both-sides files as already-synced with no
 # content check at all - two different files that happen to share a byte

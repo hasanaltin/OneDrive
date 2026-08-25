@@ -70,6 +70,8 @@ class PairSyncWorker(threading.Thread):
         self.on_auth_required = on_auth_required or (lambda: None)
         self.on_conflict = on_conflict or (lambda _name, _path: None)
 
+        self._last_progress_update: dict[int, float] = {}
+
         self._stop = threading.Event()
         self._event_queue: "queue.Queue[tuple[int, float]]" = queue.Queue()
         self._watcher = LocalWatcher(self._event_queue)
@@ -131,6 +133,27 @@ class PairSyncWorker(threading.Thread):
         refresh itself)."""
         self.db.update_pair_status(pair_id, message)
         self.on_status(pair_id, message)
+
+    def _set_progress_status(self, pair_id: int, message: str) -> None:
+        """Same as _set_status, but rate-limited to at most a few times a
+        second per pair - meant for the per-file "Uploading/Downloading X"
+        message inside a large batch, where the underlying action itself can
+        take well under a second (e.g. a small file, or a 404-fast-path
+        delete). Calling _set_status for every single one of those means a
+        DB write plus a cross-thread Qt signal per file - harmless for a
+        handful of files, but a real burden on both the DB (lock contention
+        with the GUI thread's own reads) and the GUI thread (a flood of
+        signal deliveries to process) once a batch reaches into the
+        thousands, exactly the kind of large batch this app can legitimately
+        have (a big pinned folder, a first-time pair bootstrap). The status
+        line only needs to be fresh enough for a human to read, not updated
+        every single file - not calling this for most files in a fast batch
+        doesn't lose anything the user could actually perceive."""
+        now = time.monotonic()
+        if now - self._last_progress_update.get(pair_id, 0.0) < constants.PAIR_PROGRESS_UPDATE_INTERVAL_SECONDS:
+            return
+        self._last_progress_update[pair_id] = now
+        self._set_status(pair_id, message)
 
     def _sync_one_pair_safely(self, pair_id: int) -> None:
         try:
@@ -199,6 +222,20 @@ class PairSyncWorker(threading.Thread):
                 )
                 stopped_early = True
                 break
+            if idx % 20 == 0:
+                # A deliberate scheduling point, not a real delay - CPython's
+                # GIL is released on bytecode-count/time slices regardless,
+                # but that doesn't guarantee the GUI thread specifically gets
+                # picked next rather than another worker thread. A tight loop
+                # over thousands of actions (each doing real work: a Graph
+                # call, a DB write, a log line) reproducibly left the GUI
+                # feeling unresponsive during a large batch even though it
+                # was never actually blocked - sleep(0) hands control to the
+                # scheduler explicitly instead of hoping it gets there soon
+                # enough on its own. Every 20th action, not every one -
+                # frequent enough to matter, rare enough that the syscall
+                # overhead is nothing next to the actual work being done.
+                time.sleep(0)
             try:
                 if action.type == ActionType.CONFLICT:
                     self._resolve_conflict(pair, action, local_map, remote_map)
@@ -440,7 +477,7 @@ class PairSyncWorker(threading.Thread):
         if verb:
             logger.info("pair %s: %s %s", pair.id, verb, action.rel_path)
             prefix = f"{verb} ({progress[0]}/{progress[1]})" if progress else verb
-            self._set_status(pair.id, f"{prefix}: {action.rel_path}")
+            self._set_progress_status(pair.id, f"{prefix}: {action.rel_path}")
 
         if action.type == ActionType.CREATE_REMOTE_DIR:
             parent_id = self._resolve_parent_remote_id(pair, action.rel_path, remote_map, created_remote_ids)
