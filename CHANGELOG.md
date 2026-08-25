@@ -3,6 +3,86 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.0] — A Folder Pair bootstrap race could flag identical files as conflicts forever
+
+### Fixed
+- **Real bug, root-caused from a live report:** pairing an already-identical, Nextcloud-synced
+  Pictures folder on a second PC produced hundreds of conflicts instead of silently recognizing
+  the matching content, despite `reconcile.py`'s bootstrap same-content heuristic existing
+  specifically to prevent that. `DeltaSyncWorker` and `PairSyncWorker` start with no
+  synchronization barrier between them, so a brand-new pair's first ("bootstrap") reconcile pass
+  can run while the initial whole-account delta crawl is still mid-flight - a file already on
+  Graph but not yet in the local delta cache gets misread as local-only and routed to upload,
+  Graph 409s "nameAlreadyExists" (correctly - it's not actually new), `graph_client`'s
+  retry-as-replace lookup occasionally races Graph's own read-after-write consistency and comes
+  back empty, and the resulting `GraphConflictError` was silently swallowed by the pair worker's
+  generic handler (it only knows how to refresh an item it already has an id for, which a fresh
+  create never does). The pass still stamped `last_sync_at`, permanently flipping the pair's
+  bootstrap eligibility off - so the very next pass saw that same, however byte-identical, file
+  with no bootstrap trust left to recognize it, and flagged a real conflict regardless of matching
+  size/hash.
+  - Two-part fix: `graph_client.upload_file()` now retries the post-409 lookup a couple of times
+    with backoff before giving up (closes the race at its source in the common case), and
+    `pair_worker._sync_one_pair()` now treats a still-unresolved case as a genuinely incomplete
+    pass (same as pausing mid-batch) instead of stamping `last_sync_at` - keeps bootstrap
+    eligibility truthful for the next pass instead of permanently burning it on a transient race.
+  - Only prevents *future* false conflicts - doesn't retroactively clear ones already recorded
+    before upgrading (see the bulk-resolve addition below).
+- **Secondary bug found while tracing the above:** `_write_bootstrap_baselines` re-derived "already
+  synced" baselines from the pre-pass local/remote snapshot with no check for paths that already
+  got a real action (including a conflict) during that same pass, so it could silently overwrite a
+  just-written, correct post-conflict baseline with stale pre-resolution data. Now takes the set of
+  paths actually acted on this pass and skips them.
+- **Conflicts dialog's bulk-resolve could silently stop at 200:** `db.list_conflicts()`'s
+  `limit=200` default exists for the on-screen review list (loading e.g. 1,401 individual rows
+  would be slow), but the new "Keep Local/Server (All N)" buttons reused that same capped query -
+  clicking them only ever resolved the first page and silently left the rest, while the button
+  label itself under-reported the true count too. Both now use `count_conflicts()` (the real
+  total), and the bulk action explicitly re-queries with that total as the limit.
+- **`install.sh`'s libfuse3 detection could report "not found" even when it was:** `set -o
+  pipefail` combined with `grep -q`'s early exit on the first match sends the upstream `ldconfig`
+  process a SIGPIPE, which `pipefail` was then treating as the whole check failing - a classic,
+  easy-to-miss shell scripting gotcha. Fixed by capturing `ldconfig -p`'s output into a variable
+  first and grepping that, instead of piping the two live.
+- **`install.sh` silently trusted a broken `.venv` if the directory merely existed:** a partially-
+  created venv (`python3 -m venv` failing partway through, e.g. missing `ensurepip`) or one copied
+  from another machine without its executable permissions both left a `.venv/` that looked present
+  but had no working `bin/pip` - the "already exists, reusing" fast path took that at face value
+  and failed much later, confusingly, at the dependency-install step. Now verified with a real
+  `-x bin/pip` check before being trusted, recreating from scratch otherwise.
+- **`install.sh` calling `register_azure_app.sh` directly could fail with "Permission denied"**
+  if that script's executable bit was lost in transit (the same file-transfer issue as the `.venv`
+  case above) - now invoked via `bash register_azure_app.sh` regardless of its own permission bit.
+- **`update_check.py`'s "Check for Updates" could report a false "local changes" block** because
+  Claude Code's own `.claude/` session directory sat untracked and un-ignored in the repo -
+  `.gitignore` now excludes it.
+
+### Added
+- **`install.sh` now actually installs the system packages it needs instead of just warning about
+  them:** detects apt/dnf/pacman/zypper and installs FUSE 3, and - only if no prebuilt Python wheel
+  is available for the running Python version - the C compiler, `pkg-config`, and the
+  `libfuse3`/Python development headers needed to build `pyfuse3` from source, plus the
+  `python3-venv`-equivalent package if venv creation fails for a missing `ensurepip`. Found and
+  fixed each of these one at a time by actually running the fresh-clone install end to end on a
+  real machine, not by inspection.
+- **`install.sh` now offers to run `register_azure_app.sh` for you** right after a successful
+  install if no Azure app is configured yet, instead of only printing the command to run later.
+- **`register_azure_app.sh` now adds the required Microsoft Graph API permissions and grants
+  admin consent automatically**, closing the one remaining manual portal step. Permission names
+  are resolved to their GUIDs via a live lookup against the Microsoft Graph service principal
+  itself (the same data the portal's own "Add a permission" search uses), not hardcoded from
+  memory - falls back to the original manual instructions if anything can't be resolved or the
+  signed-in account lacks the rights to consent.
+- **Conflicts dialog: bulk "Keep Local (All)" / "Keep Server (All)" buttons**, alongside the
+  existing per-row review - resolving hundreds of conflicts one at a time didn't scale (e.g.
+  pairing an already-matching folder on a second device). Reuses the same permanent-delete warning
+  the per-row confirm already shows, now stating the true affected count up front.
+- **The self-update path (`apply_update()`) now self-heals if `git pull --ff-only` can't
+  fast-forward** - e.g. after a maintainer history rewrite - instead of leaving every user's
+  "Update Now" broken with no recovery short of manual git commands. Falls back to `fetch` +
+  `reset --hard origin/main`, but only after re-confirming the checkout truly has no local changes
+  to lose.
+
 ## [0.7.3] — Document the required Azure app permissions in README
 
 ### Added
