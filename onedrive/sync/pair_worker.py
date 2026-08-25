@@ -315,7 +315,18 @@ class PairSyncWorker(threading.Thread):
                 continue
             if not item.path.startswith(prefix):
                 continue  # shouldn't happen, but don't misfile it under the wrong rel_path
-            if _is_excluded(item.name, patterns):
+            rel = item.path[len(prefix):]
+            # Checked against every path component, not just item.name -
+            # _build_local_map's os.walk prunes an excluded directory's
+            # whole subtree, so a pattern like ".venv" excludes everything
+            # under it too, not just an item literally named ".venv".
+            # Checking item.name alone here missed that: a deeply-nested
+            # file whose own name doesn't match any pattern (e.g. a vendored
+            # package's resolver.py under .venv/lib/.../site-packages/...)
+            # stayed in remote_map while local_map correctly excluded the
+            # whole tree, so the mismatch got reconciled as a real deletion/
+            # download instead of being left alone like the local side was.
+            if any(_is_excluded(part, patterns) for part in rel.split("/")):
                 continue
             if item.remote_id is None:
                 # Not yet synced - most commonly an item created through the
@@ -329,7 +340,6 @@ class PairSyncWorker(threading.Thread):
                 # reproduced directly, sends that synthetic id straight into
                 # a Graph URL and 400s every single pass).
                 continue
-            rel = item.path[len(prefix):]
             result[rel] = RemoteEntry(
                 is_folder=item.is_folder, size=item.size, etag=item.etag or "", remote_item_id=item.remote_id,
                 quickxor_hash=item.quickxor_hash,
