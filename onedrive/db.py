@@ -141,6 +141,13 @@ DEFAULT_EXCLUDE_PATTERNS = "\n".join([
     # stayed open, purely from having it open, not from any real content
     # worth syncing (same class of problem as the editor swap files above).
     ".~lock.*#",
+    # Developer-project internals: regenerable/reproducible, not meant to be
+    # backed up this way (git history belongs on an actual git remote, not
+    # replicated via a general-purpose two-way file sync - .git's own
+    # object-store churn during a commit/gc doesn't play well with being
+    # treated as ordinary files anyway), and often huge (a venv or
+    # node_modules can be tens of thousands of files) for no benefit.
+    ".git", ".venv", "venv", "node_modules", "__pycache__",
 ])
 
 
