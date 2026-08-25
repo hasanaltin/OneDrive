@@ -3,11 +3,31 @@ import logging
 import os
 from pathlib import Path, PurePosixPath
 
+import requests
+
 from onedrive.content_cache import path_for
 from onedrive.db import Database
 from onedrive.graph_client import GraphClient
 
 logger = logging.getLogger(__name__)
+
+
+def _delete_if_exists(graph: GraphClient, drive_id: str, item_id: str) -> None:
+    """delete_item() is idempotent from this app's perspective: a 404 means
+    Graph already doesn't have the item - possibly a stale conflict record
+    whose target was cleaned up through ordinary use since it was raised, or
+    simply raced with the "already removed remotely" case the keep_local
+    cleanup below already tolerates. Either way the goal ("this item is
+    gone") is already true, so it isn't a real failure the way any other
+    status code would be - without this, a single such 404 blocked the
+    whole "resolve all" bulk action on an otherwise-healthy conflict."""
+    try:
+        graph.delete_item(drive_id, item_id)
+    except requests.exceptions.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            logger.info("delete_item(%s) was already gone (404) - treating as resolved", item_id)
+            return
+        raise
 
 
 def _mtime_iso(stat_result) -> str:
@@ -56,7 +76,7 @@ def resolve_pair_conflict(db: Database, graph: GraphClient, pair, conflict_row: 
     if decision == "keep_server":
         conflict_pf = db.get_pair_file(pair.id, conflict_rel)
         if conflict_pf is not None and conflict_pf.remote_item_id:
-            graph.delete_item(pair.drive_id, conflict_pf.remote_item_id)
+            _delete_if_exists(graph, pair.drive_id, conflict_pf.remote_item_id)
             # Tombstone it in the items cache immediately, rather than
             # waiting for DeltaSyncWorker's next poll - otherwise the very
             # next reconciliation pass can still see this path in
@@ -138,7 +158,7 @@ def resolve_mount_conflict(db: Database, graph: GraphClient, drive_id: str, conf
         conflict_item = db.get_item_by_path(drive_id, conflict_rel)
         if conflict_item is not None:
             if conflict_item.remote_id:
-                graph.delete_item(drive_id, conflict_item.remote_id)
+                _delete_if_exists(graph, drive_id, conflict_item.remote_id)
             db.mark_deleted(drive_id, conflict_item.id)
             cached = path_for(drive_id, conflict_item.id)
             if cached.exists():
