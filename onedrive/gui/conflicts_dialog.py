@@ -88,12 +88,13 @@ class ConflictsDialog(QDialog):
         self._resolved.connect(self._on_resolved)
         self._bulk_resolved.connect(self._on_bulk_resolved)
 
-        self._info = QLabel(
+        self._info_base_text = (
             "Each of these files was edited on both sides before either edit had been synced, "
             "so nothing was overwritten: the local edit was kept, saved alongside the remote "
             "version under a new “(conflicted copy …)” name. Choose which version to keep, or "
             "Dismiss to leave both files as they are."
         )
+        self._info = QLabel(self._info_base_text)
         self._info.setWordWrap(True)
         self._layout.addWidget(self._info)
 
@@ -125,6 +126,7 @@ class ConflictsDialog(QDialog):
 
     def _reload(self) -> None:
         conflicts = self.db.list_conflicts(self.source)
+        total = self.db.count_conflicts(self.source)
         self._list.clear()
 
         self._bulk_local_btn.setVisible(bool(conflicts))
@@ -148,8 +150,16 @@ class ConflictsDialog(QDialog):
         self._empty_label.hide()
         self._info.show()
         self._list.show()
-        self._bulk_local_btn.setText(f"Keep Local (All {len(conflicts)})")
-        self._bulk_server_btn.setText(f"Keep Server (All {len(conflicts)})")
+        self._bulk_local_btn.setText(f"Keep Local (All {total})")
+        self._bulk_server_btn.setText(f"Keep Server (All {total})")
+        if total > len(conflicts):
+            self._info.setText(
+                self._info_base_text + f"\n\nShowing the {len(conflicts)} most recent of "
+                f"{total} total - the two buttons below act on all {total} regardless of how "
+                "many are listed here."
+            )
+        else:
+            self._info.setText(self._info_base_text)
         for c in conflicts:
             row = _ConflictRow(c, self._on_decision)
             item = QListWidgetItem()
@@ -167,7 +177,12 @@ class ConflictsDialog(QDialog):
         self._close_btn.setEnabled(not busy)
 
     def _bulk_resolve(self, decision: str) -> None:
-        conflicts = self.db.list_conflicts(self.source)
+        # list_conflicts()'s default limit (200) is meant for the on-screen
+        # review list, not for "resolve everything" - passing the true total
+        # from count_conflicts() as the limit makes sure this acts on all of
+        # them, not just the page currently displayed.
+        total = self.db.count_conflicts(self.source)
+        conflicts = self.db.list_conflicts(self.source, limit=total)
         if not conflicts:
             return
 
