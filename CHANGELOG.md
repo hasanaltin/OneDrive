@@ -3,6 +3,25 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.6] — Excluding an already-synced file, then un-excluding it, forced a conflict
+
+### Fixed
+- **Real bug, reported live:** adding `*.db` to the global ignore list (Settings) to exclude a
+  Remote Desktop Manager backup folder from a Folder Pair, then later removing it again, forced
+  every already-in-sync `.db` file into a "keep both" conflict instead of being recognized as
+  still in sync. `_build_local_map`/`_build_remote_map` correctly dropped excluded paths, but
+  `_build_synced_map` didn't - so `reconcile_pair` saw a matching pair's baseline with both sides
+  now "missing" (because they were excluded, not actually gone) and purged the baseline outright.
+  The next time the pattern was removed, those files came back with no baseline at all, so
+  `reconcile_pair` treated already-identical content on both sides as a brand-new conflict and
+  ran the full keep-both dance (rename local to a conflicted copy, re-upload, re-download) on
+  files that never actually needed it. Excluded paths now keep their `pair_files` baseline
+  completely untouched while excluded, instead of it being silently purged - removing an exclude
+  pattern now just resumes normal reconciliation against the still-valid old baseline. Verified
+  directly: building the synced map while a pattern is active no longer touches the underlying
+  row, and reconciling unchanged content against a baseline that survived a full exclude/un-exclude
+  cycle now correctly resolves to no action at all.
+
 ## [0.9.5] — The update mechanism could dead-end requiring manual git commands
 
 ### Changed

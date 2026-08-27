@@ -188,7 +188,7 @@ class PairSyncWorker(threading.Thread):
         patterns = _parse_patterns(global_patterns)
         local_map = self._build_local_map(Path(pair.local_path), patterns)
         remote_map = self._build_remote_map(pair.drive_id, pair.remote_item_id, root_path, patterns)
-        synced_map = self._build_synced_map(pair.id)
+        synced_map = self._build_synced_map(pair.id, patterns)
 
         is_bootstrap = pair.last_sync_at is None
         if is_bootstrap:
@@ -406,9 +406,26 @@ class PairSyncWorker(threading.Thread):
                 continue
             local_map[rel_path] = replace(local, quickxor_hash=quickxorhash_base64(data))
 
-    def _build_synced_map(self, pair_id: int) -> dict[str, SyncedEntry]:
+    def _build_synced_map(self, pair_id: int, patterns: list[str]) -> dict[str, SyncedEntry]:
         result = {}
         for pf in self.db.list_pair_files(pair_id):
+            # Excluded paths must stay completely invisible to reconcile_pair -
+            # not just missing from local_map/remote_map. Real bug, reported
+            # live: adding "*.db" to the global ignore list made
+            # _build_local_map/_build_remote_map correctly drop those paths,
+            # but this map still carried their baseline, so reconcile_pair
+            # saw L=None, R=None, S=present and purged the baseline outright
+            # (PURGE_TOMBSTONE) - harmless to the actual files in the moment,
+            # but the *next* time the pattern was removed, those same
+            # already-in-sync files came back with no baseline at all and
+            # were misclassified as a brand-new both-sides-present conflict
+            # instead of being recognized as already synced. Filtering the
+            # baseline out here too means an excluded path's pair_files row
+            # is left completely untouched while excluded, so removing the
+            # pattern later just resumes normal reconciliation against the
+            # still-valid old baseline - not a fake conflict.
+            if any(_is_excluded(part, patterns) for part in pf.rel_path.split("/")):
+                continue
             result[pf.rel_path] = SyncedEntry(
                 remote_item_id=pf.remote_item_id,
                 last_synced_etag=pf.last_synced_etag,
