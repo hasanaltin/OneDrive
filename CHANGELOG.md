@@ -3,6 +3,23 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.5] — The update mechanism could dead-end requiring manual git commands
+
+### Changed
+- **`check_for_update()`/`apply_update()` are now fully self-healing - reported directly: "this
+  needs to be stable, in the future users can't run commands [if this happens again]."** Both
+  functions used to give up and raise an error - "resolve or discard local changes", "can't
+  fast-forward" - whenever the checkout wasn't in a pristine state, on the theory that a maintainer
+  would decide how to handle it. In practice that just left an ordinary end user staring at an
+  error with no git knowledge to act on it. This checkout is a deployed app's own clone, never
+  meant to carry local edits or commits of its own, so there's nothing worth protecting over a
+  clean sync: `check_for_update()` no longer blocks on local changes at all (it only answers "is
+  there a newer commit", regardless of working-tree state), and `apply_update()` always ends up
+  matching the remote exactly - tries a clean fast-forward first, and force-syncs to `FETCH_HEAD`
+  for anything that doesn't fast-forward (a dirty tree, or history diverged by a rewritten
+  remote - this project's own `main` has been squashed and force-pushed more than once). Verified
+  directly against a simulated dirty-plus-diverged checkout before shipping.
+
 ## [0.9.4] — Remote changes on another machine took minutes to show up
 
 ### Changed

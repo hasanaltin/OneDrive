@@ -43,17 +43,17 @@ def _run_git(*args: str, timeout: float = 15.0) -> str:
 def check_for_update() -> str | None:
     """Returns the new version string (or a short commit hash if the
     remote's constants.py couldn't be read/parsed) if an update is
-    available, None if already up to date. Raises UpdateCheckError on any
-    git/network failure, or if this checkout has local modifications
-    (apply_update()'s `git pull --ff-only` would otherwise fail or, worse,
-    silently need a merge) - the caller decides how to surface that."""
+    available, None if already up to date. Raises UpdateCheckError only on
+    a genuine git/network failure or a missing .git directory - deliberately
+    does NOT gate on local changes the way an earlier version of this
+    function did. Whether apply_update() can cleanly land the update is
+    apply_update()'s own problem to self-heal (see its docstring) - an end
+    user has no realistic way to run git commands themselves ("bunun stabil
+    olmasi lazim ... kullanicilar komut calistiramaz", reported directly),
+    so this function's only job is to answer "is there a newer commit",
+    accurately, regardless of what state the working tree happens to be in."""
     if not (REPO_DIR / ".git").is_dir():
         raise UpdateCheckError("not a git checkout - can't check for updates this way")
-
-    if _run_git("status", "--porcelain"):
-        raise UpdateCheckError(
-            "This checkout has local changes - resolve or discard them before updating."
-        )
 
     _run_git("fetch", "origin", "main", timeout=30.0)
     local_head = _run_git("rev-parse", "HEAD")
@@ -89,27 +89,32 @@ def apply_update() -> None:
     """Pulls the update already confirmed available by check_for_update(),
     then reinstalls dependencies (a new version may have added one) -
     mirrors install.sh's own dependency step, safe to re-run (pip no-ops
-    on anything already satisfied). Tries --ff-only first - this checkout
-    is never meant to carry local commits, so a normal update should always
-    be a fast-forward. If the remote history was ever rewritten upstream
-    (e.g. a maintainer force-push), --ff-only can't reconcile that and every
-    user's checkout would otherwise be stuck needing a git expert to
-    unbreak it manually - so as a fallback, and only after re-confirming
-    there are truly no local changes to lose, this force-syncs to whatever
-    origin/main now is instead of leaving the update button broken."""
+    on anything already satisfied).
+
+    Always ends up matching origin/main exactly, however it gets there -
+    this checkout is a deployed application's own clone, never meant to
+    carry local commits or edits of its own, so there's nothing here worth
+    preserving over a clean sync. An earlier version of this function
+    raised an error and gave up whenever the tree had local changes or
+    couldn't fast-forward - in practice that just left an ordinary end user
+    staring at an error with no git command they could realistically be
+    expected to run themselves (reported directly: this needs to be
+    stable, users can't run commands). So every path below is automatic:
+    try the clean fast-forward first (the common case, and the only one
+    that can't lose anything even in principle), and if that doesn't apply
+    - dirty tree, diverged history from a rewritten remote (this project's
+    own main has been squashed and force-pushed more than once), or
+    anything else - fall back to force-syncing this checkout to match
+    FETCH_HEAD exactly instead of stopping to ask."""
+    _run_git("fetch", "origin", "main", timeout=30.0)
     try:
-        _run_git("pull", "--ff-only", "origin", "main", timeout=60.0)
+        _run_git("merge", "--ff-only", "FETCH_HEAD", timeout=15.0)
     except UpdateCheckError:
-        if _run_git("status", "--porcelain"):
-            raise UpdateCheckError(
-                "Update can't fast-forward and this checkout has local changes - "
-                "resolve or discard them before updating."
-            )
-        logger.warning("fast-forward update failed; force-syncing to origin/main instead")
-        _run_git("fetch", "origin", "main", timeout=30.0)
-        # FETCH_HEAD, not origin/main - same staleness risk as the one fixed
-        # in check_for_update() above, and this path runs a hard reset, so
-        # getting it wrong would be worse than just missing an update notice.
+        logger.warning("fast-forward update didn't apply cleanly - force-syncing to FETCH_HEAD instead")
+        # FETCH_HEAD, not origin/main - same staleness risk fixed in
+        # check_for_update() above, and this path forcibly overwrites the
+        # checkout, so getting it wrong would be worse than just missing
+        # an update.
         _run_git("reset", "--hard", "FETCH_HEAD", timeout=15.0)
 
     venv_pip = REPO_DIR / ".venv" / "bin" / "pip"
