@@ -3,6 +3,21 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.2] — install.sh's Azure-app prompt didn't actually work when piped through bootstrap.sh
+
+### Fixed
+- **The "register an Azure app now?" prompt silently skipped itself under `bootstrap.sh`:**
+  `install.sh` decided whether to ask interactively by checking `[ -t 0 ]` (is stdin a terminal),
+  but running it via `bootstrap.sh`'s `curl ... | bash` puts the whole piped script on stdin, so
+  by the time `install.sh` runs, fd 0 is exhausted and reads as non-interactive even in a plain
+  terminal session someone is actively watching. It now asks via `/dev/tty` - the actual
+  controlling terminal - instead, so the prompt (and the `register_azure_app.sh` it launches on
+  "yes") works the same whether you ran `install.sh` directly or through the one-line bootstrap.
+  Falls back to printing the manual command only when there's genuinely no terminal attached at
+  all (a true headless/CI run). `bootstrap.sh`'s own closing summary now also checks whether the
+  Client ID file actually got written, rather than unconditionally telling you to register an app
+  you may have just registered one screen up.
+
 ## [0.9.1] — One-command install, and a fresh-distro Azure CLI install failure fixed
 
 ### Added

@@ -54,12 +54,25 @@ fi
 
 echo "==> Running install.sh"
 cd "$CLONE_DIR"
-# Piped into this shell's own stdin (not a tty), so install.sh's interactive
-# "run register_azure_app.sh now?" prompt correctly detects that via its own
-# `[ -t 0 ]` check and just prints the manual next step instead of hanging.
+# This script's own stdin is the now-exhausted curl pipe, not a real
+# terminal - install.sh's "register an Azure app now?" prompt knows to ask
+# via /dev/tty instead, so it still works interactively here as long as
+# you're watching this run live in a terminal.
 ./install.sh
 
-cat <<EOF
+CLIENT_ID_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/OneDrive/client_id"
+if [ -s "$CLIENT_ID_FILE" ]; then
+    cat <<EOF
+
+==> Done. One step remains - launch the app and sign in:
+      $CLONE_DIR/.venv/bin/python3 -m onedrive
+    (or from your applications menu) - sign in with the device code it shows you.
+
+After that, every future launch (including on login) mounts ~/OneDrive
+automatically - no further steps needed.
+EOF
+else
+    cat <<EOF
 
 ==> Done. Two one-time steps remain before OneDrive is mounted:
 
@@ -73,3 +86,4 @@ cat <<EOF
 After that, every future launch (including on login) signs in and mounts
 ~/OneDrive automatically - no further steps needed.
 EOF
+fi

@@ -239,21 +239,29 @@ if [ ! -s "$CLIENT_ID_FILE" ] && [ -z "${ONEDRIVE_NATIVE_CLIENT_ID:-}" ]; then
     echo "Done. One more required step before signing in - this app has no Azure app"
     echo "identity built in, so register your own first."
     echo ""
-    if [ -t 0 ]; then
-        read -r -p "Run ./register_azure_app.sh now? [Y/n] " RUN_AZURE_REG
+    # Stdin itself may not be a tty here even in a genuinely interactive run -
+    # e.g. bootstrap.sh's `curl ... | bash` pipes this whole script in on fd
+    # 0, so `[ -t 0 ]` reads as false and a plain `read` would just get EOF
+    # instantly. /dev/tty is the actual controlling terminal, still reachable
+    # as long as someone's watching the run live, so ask there instead and
+    # only fall back to silently printing the manual step when there's truly
+    # no terminal attached at all (a real headless/CI run).
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        read -r -p "Register an Azure app now? [Y/n] " RUN_AZURE_REG < /dev/tty > /dev/tty
         case "$RUN_AZURE_REG" in
             [nN]*)
                 echo "Skipping - run it yourself later with:"
                 echo "  ./register_azure_app.sh"
                 ;;
             *)
-                if ! bash "$REPO_DIR/register_azure_app.sh"; then
+                if ! bash "$REPO_DIR/register_azure_app.sh" < /dev/tty; then
                     echo "register_azure_app.sh exited with an error - you can re-run it manually:" >&2
                     echo "  ./register_azure_app.sh" >&2
                 fi
                 ;;
         esac
     else
+        echo "No terminal attached to ask interactively - run it yourself when ready:"
         echo "  ./register_azure_app.sh"
     fi
     echo ""
