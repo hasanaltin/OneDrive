@@ -27,10 +27,28 @@ CLIENT_ID_FILE="$CONFIG_DIR/client_id"
 echo "==> Checking for Azure CLI"
 if ! command -v az >/dev/null 2>&1; then
     echo "    not found - installing via Microsoft's official script (needs sudo)"
-    curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-else
-    echo "    found: $(az version --query '\"azure-cli\"' -o tsv 2>/dev/null || echo present)"
+    if ! curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash; then
+        # Microsoft's apt repo doesn't always have packages for a brand-new
+        # distro release codename yet ("E: Unable to locate package
+        # azure-cli" - confirmed live on a fresh install of a just-released
+        # Ubuntu version) - falls back to a dedicated venv + pip install,
+        # which only needs PyPI, not a matching apt release.
+        echo "    Microsoft's apt-based installer failed - likely means this distro" >&2
+        echo "    release is too new for their package repo yet. Falling back to a" >&2
+        echo "    dedicated pip install instead." >&2
+        AZ_VENV="${XDG_DATA_HOME:-$HOME/.local/share}/onedrive-native-az-cli"
+        python3 -m venv "$AZ_VENV"
+        "$AZ_VENV/bin/pip" install --quiet --upgrade pip
+        "$AZ_VENV/bin/pip" install --quiet azure-cli
+        export PATH="$AZ_VENV/bin:$PATH"
+    fi
 fi
+if ! command -v az >/dev/null 2>&1; then
+    echo "Azure CLI still not found - install it manually, then re-run this script:" >&2
+    echo "  https://learn.microsoft.com/cli/azure/install-azure-cli-linux" >&2
+    exit 1
+fi
+echo "    using: $(az version --query '\"azure-cli\"' -o tsv 2>/dev/null || echo present)"
 
 echo "==> Signing in (this opens a browser - sign in with an account that has"
 echo "    Application Administrator or Global Administrator rights in the"

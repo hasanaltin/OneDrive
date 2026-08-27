@@ -3,6 +3,29 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.1] — One-command install, and a fresh-distro Azure CLI install failure fixed
+
+### Added
+- **`bootstrap.sh`** - a single-command installer for a brand-new machine:
+  `curl -fsSL https://raw.githubusercontent.com/hasanaltin/OneDrive/main/bootstrap.sh | bash`
+  installs `git` if missing, clones the repo to `~/onedrive-linux-client` (or updates it in place
+  if already cloned), and runs `install.sh`. Registering an Azure app and the app's own first
+  sign-in remain one-time interactive steps by nature (a browser-based `az login` and a
+  device-code prompt) - `bootstrap.sh` prints exactly what to run for both once it finishes.
+
+### Fixed
+- **`register_azure_app.sh` failed outright on a brand-new distro release:** Microsoft's official
+  `curl | sudo bash` Azure CLI installer adds an apt source keyed to the running distro's
+  codename, and their `packages.microsoft.com` repo doesn't always have `azure-cli` published for
+  a codename the moment it's released - confirmed live as `E: Unable to locate package azure-cli`
+  right after a fresh install of a just-released Ubuntu version. Now falls back to installing
+  Azure CLI into a dedicated venv via `pip` instead, which only needs PyPI to have published a
+  wheel, not a matching apt release.
+- **README's Azure app setup section was out of date** - it still said API-permission granting was
+  a manual portal step, but `register_azure_app.sh` already automates adding the permissions and
+  granting admin consent (falling back to manual steps only if a call in that chain fails).
+  Corrected to describe what the script actually does now.
+
 ## [0.9.0] — A Folder Pair bootstrap race could flag identical files as conflicts forever
 
 ### Fixed

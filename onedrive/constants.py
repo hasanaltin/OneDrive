@@ -33,7 +33,7 @@ def ensure_fuse_library_path() -> None:
 
 # --- App identity -----------------------------------------------------------
 DISPLAY_NAME = "OneDrive for Linux Client"
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 
 # APP_NAME is used for on-disk paths (config/cache/data dirs, log file name,
 # lock file, keyring service, FUSE fsname) and the Dolphin plugins' overlay

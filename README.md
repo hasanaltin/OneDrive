@@ -68,6 +68,15 @@ instant on-demand browsing *and* real two-way sync, with a native GUI, in one ap
 
 ## Installation
 
+One command, on a fresh machine - clones the repo to `~/onedrive-linux-client` and runs
+`install.sh` for you:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hasanaltin/OneDrive/main/bootstrap.sh | bash
+```
+
+Or do it by hand:
+
 ```bash
 git clone https://github.com/hasanaltin/OneDrive.git onedrive
 cd onedrive
@@ -98,12 +107,13 @@ Microsoft sign-in consent screen shows *your* app's identity, not a stranger's:
 
 This needs an account with Application Administrator or Global Administrator rights in whichever
 Microsoft tenant you want the app registered in - your own personal Microsoft account's tenant
-works fine too. It opens a browser for `az login`, creates a multi-tenant app registration (so any
-Microsoft account can still sign in through it afterward, not just your own tenant), and writes
-the resulting Client ID to `~/.config/OneDrive/client_id` - no source file editing needed.
-The one remaining step it deliberately doesn't automate (to avoid guessing at Microsoft Graph
-permission GUIDs) is granting API permissions, listed below; the script also prints these exact
-steps at the end.
+works fine too. It installs the Azure CLI if it isn't already present, opens a browser for
+`az login`, creates a multi-tenant app registration (so any Microsoft account can still sign in
+through it afterward, not just your own tenant), adds the required Microsoft Graph permissions
+below, grants admin consent, and writes the resulting Client ID to
+`~/.config/OneDrive/client_id` - no source file editing or portal clicking needed on the common
+path. If any of those automated steps fails (e.g. a permission GUID lookup or the consent call),
+the script falls back to printing the exact manual steps for whatever's left.
 
 ### Required Microsoft Graph API permissions
 
