@@ -57,12 +57,26 @@ def check_for_update() -> str | None:
 
     _run_git("fetch", "origin", "main", timeout=30.0)
     local_head = _run_git("rev-parse", "HEAD")
-    remote_head = _run_git("rev-parse", "origin/main")
+    # FETCH_HEAD, not origin/main: this project's history has been squashed
+    # and force-pushed to main more than once (a deliberate scrub of
+    # sensitive content each time, not an accident) - real bug found live
+    # on a second machine, where "Check for Updates" kept saying "up to
+    # date" while its own About tab still showed an old version. `git
+    # fetch origin main` given a bare ref name on the command line only
+    # reliably updates FETCH_HEAD; whether it also force-updates the
+    # refs/remotes/origin/main tracking ref for a non-fast-forward history
+    # (exactly what a squash produces) isn't guaranteed the way it would be
+    # for a plain `git fetch origin` using the clone's configured refspec.
+    # A stale origin/main left over from before a squash happened to equal
+    # the also-stale local HEAD, so the comparison below silently passed.
+    # FETCH_HEAD has no such ambiguity - it's always exactly what this
+    # fetch just retrieved.
+    remote_head = _run_git("rev-parse", "FETCH_HEAD")
     if local_head == remote_head:
         return None
 
     try:
-        remote_constants = _run_git("show", "origin/main:onedrive/constants.py")
+        remote_constants = _run_git("show", "FETCH_HEAD:onedrive/constants.py")
         match = re.search(r'VERSION\s*=\s*"([^"]+)"', remote_constants)
         if match:
             return match.group(1)
@@ -93,7 +107,10 @@ def apply_update() -> None:
             )
         logger.warning("fast-forward update failed; force-syncing to origin/main instead")
         _run_git("fetch", "origin", "main", timeout=30.0)
-        _run_git("reset", "--hard", "origin/main", timeout=15.0)
+        # FETCH_HEAD, not origin/main - same staleness risk as the one fixed
+        # in check_for_update() above, and this path runs a hard reset, so
+        # getting it wrong would be worse than just missing an update notice.
+        _run_git("reset", "--hard", "FETCH_HEAD", timeout=15.0)
 
     venv_pip = REPO_DIR / ".venv" / "bin" / "pip"
     if not venv_pip.exists():

@@ -3,6 +3,22 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.3] — "Check for Updates" could say "up to date" while genuinely behind
+
+### Fixed
+- **Real bug, reported live from a second machine:** its About tab showed an old version and
+  clicking "Check for Updates" said it was already current, even though `main` on GitHub was
+  several commits ahead. `check_for_update()` compared local `HEAD` against `origin/main` after an
+  explicit `git fetch origin main` - but a bare ref name given on the command line only reliably
+  updates `FETCH_HEAD`; whether it also force-updates the `refs/remotes/origin/main` tracking ref
+  for a non-fast-forward history isn't guaranteed the way it is for a plain `git fetch origin`
+  using the clone's own configured refspec. This project's history has been squashed and
+  force-pushed to `main` more than once (deliberately, to scrub sensitive content - not an
+  accident), which is exactly the kind of non-fast-forward change that can leave a stale
+  `origin/main` behind. Now compares against `FETCH_HEAD` instead, which is always exactly what
+  the fetch just retrieved, with no tracking-ref ambiguity. `apply_update()`'s force-sync fallback
+  (`git reset --hard`) had the identical staleness risk and is fixed the same way.
+
 ## [0.9.2] — install.sh's Azure-app prompt didn't actually work when piped through bootstrap.sh
 
 ### Fixed
