@@ -33,7 +33,7 @@ def ensure_fuse_library_path() -> None:
 
 # --- App identity -----------------------------------------------------------
 DISPLAY_NAME = "OneDrive for Linux Client"
-VERSION = "0.9.3"
+VERSION = "0.9.4"
 
 # APP_NAME is used for on-disk paths (config/cache/data dirs, log file name,
 # lock file, keyring service, FUSE fsname) and the Dolphin plugins' overlay
@@ -102,7 +102,17 @@ OVERLAY_SOCKET_PATH = RUNTIME_DIR / f"{APP_NAME}-overlay.sock"
 DEFAULT_MOUNTPOINT = Path.home() / "OneDrive"
 
 # --- Sync tuning ------------------------------------------------------------
-DELTA_POLL_INTERVAL_SECONDS = 300
+# Graph's /delta endpoint has no push/webhook path we use here, so this is a
+# plain poll - a change made on another machine isn't visible locally until
+# this fires. Was 300s (5 min); reported live as "PC2 notices a new file
+# from the other computer maybe 2 minutes later" - that's this interval
+# (up to 5 min) stacked with PairSyncWorker's own up-to-60s reconciliation
+# cadence reading whatever this last cached, averaging out to a couple of
+# minutes. Lowered to match PAIR_SYNC_INTERVAL_SECONDS so both loops run on
+# the same cadence instead of one being 5x slower than the other - a delta
+# call is cheap (returns only what changed via the stored delta token, not
+# a full re-listing), so polling it this often isn't a meaningful cost.
+DELTA_POLL_INTERVAL_SECONDS = 60
 PIN_WORKER_INTERVAL_SECONDS = 1800
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 

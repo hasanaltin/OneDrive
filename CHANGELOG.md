@@ -3,6 +3,19 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.4] — Remote changes on another machine took minutes to show up
+
+### Changed
+- **`DELTA_POLL_INTERVAL_SECONDS` lowered from 300s to 60s** - reported live: a file created on
+  one machine took roughly 2 minutes to be noticed on another. Graph's `/delta` endpoint isn't
+  pushed to us, so a remote change is only as fresh as the last poll; that 5-minute interval,
+  stacked with `PairSyncWorker`'s own up-to-60s reconciliation cadence reading whatever was last
+  cached, is exactly where a multi-minute delay of this size comes from. Now polls on the same
+  60s cadence as `PairSyncWorker` itself - a delta call only returns what changed via a stored
+  token, not a full re-listing, so polling it this often costs nothing meaningful. An immediate
+  fix without waiting for either interval already existed and still works: "Sync Now" in the tray
+  popup, or "Refresh now" in Choose Folders, both wake every worker on demand.
+
 ## [0.9.3] — "Check for Updates" could say "up to date" while genuinely behind
 
 ### Fixed
